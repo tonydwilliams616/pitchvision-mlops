@@ -1,0 +1,129 @@
+# -----------------------------------------------------------------------------
+# GitHub Actions OIDC - lets workflows assume AWS roles with short-lived
+# credentials instead of stored access keys.
+# Only one provider per URL is allowed per account: if you already have one,
+# set create_github_oidc_provider = false and the existing one is looked up.
+# -----------------------------------------------------------------------------
+resource "aws_iam_openid_connect_provider" "github" {
+  count = var.create_github_oidc_provider ? 1 : 0
+
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+}
+
+data "aws_iam_openid_connect_provider" "github" {
+  count = var.create_github_oidc_provider ? 0 : 1
+  url   = "https://token.actions.githubusercontent.com"
+}
+
+locals {
+  github_oidc_provider_arn = var.create_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
+  github_repository        = "${var.github_owner}/${var.github_repo}"
+}
+
+# -----------------------------------------------------------------------------
+# PLAN role - read-only, assumable only from pull requests in this repo
+# -----------------------------------------------------------------------------
+data "aws_iam_policy_document" "github_plan_trust" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${local.github_repository}:pull_request"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_plan" {
+  name                 = "${var.project_name}-github-plan"
+  description          = "Assumed by GitHub Actions on pull requests to run terraform plan"
+  assume_role_policy   = data.aws_iam_policy_document.github_plan_trust.json
+  max_session_duration = 3600
+}
+
+resource "aws_iam_role_policy_attachment" "github_plan_readonly" {
+  role       = aws_iam_role.github_plan.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+# Plan needs to read state and create/remove the S3 lock file.
+data "aws_iam_policy_document" "github_plan_state" {
+  statement {
+    sid       = "ListStateBucket"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.tfstate.arn]
+  }
+
+  statement {
+    sid       = "ReadState"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.tfstate.arn}/*"]
+  }
+
+  statement {
+    sid       = "ManageLockFiles"
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.tfstate.arn}/*.tflock"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_plan_state" {
+  name   = "terraform-state-access"
+  role   = aws_iam_role.github_plan.id
+  policy = data.aws_iam_policy_document.github_plan_state.json
+}
+
+# -----------------------------------------------------------------------------
+# APPLY role - assumable only from the "production" GitHub environment,
+# which will require manual approval before any apply runs.
+# -----------------------------------------------------------------------------
+data "aws_iam_policy_document" "github_apply_trust" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${local.github_repository}:environment:production"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_apply" {
+  name                 = "${var.project_name}-github-apply"
+  description          = "Assumed by GitHub Actions in the production environment to run terraform apply"
+  assume_role_policy   = data.aws_iam_policy_document.github_apply_trust.json
+  max_session_duration = 3600
+}
+
+# Broad on purpose for now: the apply role must create VPCs, EKS, IAM roles etc.
+# TODO: scope down with a permissions boundary once the stack set is stable.
+resource "aws_iam_role_policy_attachment" "github_apply_admin" {
+  #checkov:skip=CKV_AWS_274:Apply role needs broad permissions for now; will be scoped with a permissions boundary later
+  role       = aws_iam_role.github_apply.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
