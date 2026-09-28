@@ -18,7 +18,10 @@ data "aws_iam_openid_connect_provider" "github" {
 
 locals {
   github_oidc_provider_arn = var.create_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
-  github_repository        = "${var.github_owner}/${var.github_repo}"
+
+  # GitHub's OIDC subject includes immutable owner/repo IDs, which protects
+  # against repo renames and repojacking.
+  github_oidc_subject_prefix = "repo:${var.github_owner}@${var.github_owner_id}/${var.github_repo}@${var.github_repo_id}"
 }
 
 # -----------------------------------------------------------------------------
@@ -42,7 +45,7 @@ data "aws_iam_policy_document" "github_plan_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${local.github_repository}:pull_request"]
+      values   = ["${local.github_oidc_subject_prefix}:pull_request"]
     }
   }
 }
@@ -108,7 +111,7 @@ data "aws_iam_policy_document" "github_apply_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${local.github_repository}:environment:production"]
+      values   = ["${local.github_oidc_subject_prefix}:environment:production"]
     }
   }
 }
