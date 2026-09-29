@@ -111,7 +111,10 @@ data "aws_iam_policy_document" "github_apply_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${local.github_oidc_subject_prefix}:environment:production"]
+      values = [
+        "${local.github_oidc_subject_prefix}:environment:production",
+        "${local.github_oidc_subject_prefix}:environment:teardown",
+      ]
     }
   }
 }
