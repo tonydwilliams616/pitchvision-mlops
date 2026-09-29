@@ -1,0 +1,87 @@
+name: Terraform Destroy
+
+# Tears down every stack EXCEPT 00-account (budgets/alerts stay up permanently),
+# in reverse order: 30-platform -> 20-eks -> 10-network.
+# Spin back up with: Actions -> Terraform Deploy -> Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to confirm'
+        required: true
+  schedule:
+    # Nightly safety net in case you forget - 23:00 UTC (midnight UK summer time)
+    - cron: "0 23 * * *"
+
+permissions:
+  contents: read
+
+env:
+  # Keep in line with terraform-ci.yml
+  TF_VERSION: "latest"
+  TF_IN_AUTOMATION: "true"
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  discover:
+    name: find ephemeral stacks
+    if: github.event_name == 'schedule' || github.event.inputs.confirm == 'destroy'
+    runs-on: ubuntu-latest
+    outputs:
+      stacks: ${{ steps.find.outputs.stacks }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: find
+        name: List stacks in reverse order, excluding 00-account
+        run: |
+          stacks=$(find terraform/stacks -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; \
+            | sort -u \
+            | { grep -v '/00-account$' || true; } \
+            | sort -r \
+            | jq -R . | jq -sc .)
+          echo "Will destroy (in order): $stacks"
+          echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
+
+  destroy:
+    name: destroy (${{ matrix.stack }})
+    needs: discover
+    if: needs.discover.outputs.stacks != '[]'
+    runs-on: ubuntu-latest
+    # No required reviewers on this environment, so the nightly run isn't blocked
+    environment: teardown
+    permissions:
+      contents: read
+      id-token: write
+    # Shares the apply lock group so a destroy can never overlap an apply
+    concurrency:
+      group: terraform-apply-${{ matrix.stack }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: true
+      max-parallel: 1 # one at a time, newest stack first
+      matrix:
+        stack: ${{ fromJSON(needs.discover.outputs.stacks) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          role-session-name: gha-destroy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false
+
+      # Safe to run when already destroyed - empty state means "No changes"
+      - name: Destroy
+        run: terraform destroy -auto-approve -input=false -no-color -lock-timeout=5m
