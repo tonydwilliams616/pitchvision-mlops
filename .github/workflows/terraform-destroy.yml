@@ -24,47 +24,19 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
 
 jobs:
-  discover:
-    name: find ephemeral stacks
-    if: github.event_name == 'schedule' || github.event.inputs.confirm == 'destroy'
-    runs-on: ubuntu-latest
-    outputs:
-      stacks: ${{ steps.find.outputs.stacks }}
-    steps:
-      - uses: actions/checkout@v5
-      - id: find
-        name: List stacks in reverse order, excluding 00-account
-        run: |
-          stacks=$(find terraform/stacks -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; \
-            | sort -u \
-            | { grep -v '/00-account$' || true; } \
-            | sort -r \
-            | jq -R . | jq -sc .)
-          echo "Will destroy (in order): $stacks"
-          echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
-
   destroy:
-    name: destroy (${{ matrix.stack }})
-    needs: discover
-    if: needs.discover.outputs.stacks != '[]'
+    name: destroy
+    if: github.event_name == 'schedule' || github.event.inputs.confirm == 'destroy'
     runs-on: ubuntu-latest
     # No required reviewers on this environment, so the nightly run isn't blocked
     environment: teardown
     permissions:
       contents: read
       id-token: write
-    # Shares the apply lock group so a destroy can never overlap an apply
+    # Same lock as the deploy workflow's apply job
     concurrency:
-      group: terraform-apply-${{ matrix.stack }}
+      group: terraform-state
       cancel-in-progress: false
-    strategy:
-      fail-fast: true
-      max-parallel: 1 # one at a time, newest stack first
-      matrix:
-        stack: ${{ fromJSON(needs.discover.outputs.stacks) }}
-    defaults:
-      run:
-        working-directory: ${{ matrix.stack }}
     steps:
       - uses: actions/checkout@v5
 
@@ -73,15 +45,29 @@ jobs:
           role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
           role-session-name: gha-destroy-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
 
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
-      - name: Init
-        run: terraform init -input=false
+      - name: Destroy stacks in reverse order
+        run: |
+          stacks=$(find terraform/stacks -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; \
+            | sort -u \
+            | { grep -v '/00-account$' || true; } \
+            | sort -r)
 
-      # Safe to run when already destroyed - empty state means "No changes"
-      - name: Destroy
-        run: terraform destroy -auto-approve -input=false -no-color -lock-timeout=5m
+          echo "## Terraform destroy" >> "$GITHUB_STEP_SUMMARY"
+          for stack in $stacks; do
+            echo "::group::Destroy $stack"
+            (
+              cd "$stack"
+              terraform init -input=false
+              # Safe when already destroyed - empty state means "No changes"
+              terraform destroy -auto-approve -input=false -no-color -lock-timeout=5m
+            )
+            echo "::endgroup::"
+            echo "- 🗑️ \`$stack\`" >> "$GITHUB_STEP_SUMMARY"
+          done
