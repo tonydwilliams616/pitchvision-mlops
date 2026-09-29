@@ -13,6 +13,17 @@ on:
       - "terraform/modules/**"
       - ".github/workflows/terraform-deploy.yml"
   workflow_dispatch:
+    inputs:
+      stack:
+        description: "Stack to deploy (\"all\" deploys every stack in order)"
+        type: choice
+        default: all
+        options:
+          - all
+          - 00-account
+          - 10-network
+          - 20-eks
+          - 30-platform
 
 permissions:
   contents: read
@@ -25,22 +36,70 @@ env:
   TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Work out which stacks to plan/apply:
+  #   - manual run: the chosen stack, or all
+  #   - PR / merge: only stacks whose files changed; everything if a shared
+  #     module or this workflow changed
+  # ---------------------------------------------------------------------------
   discover:
-    name: find stacks
+    name: select stacks
     runs-on: ubuntu-latest
     outputs:
-      stacks: ${{ steps.find.outputs.stacks }}
+      stacks: ${{ steps.select.outputs.stacks }}
     steps:
       - uses: actions/checkout@v5
-      - id: find
-        name: List stacks (sorted, so 00- runs before 10-)
+        with:
+          fetch-depth: 0 # full history so we can diff
+
+      - id: select
+        name: Select stacks
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_STACK: ${{ inputs.stack }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
         run: |
-          stacks=$(find terraform/stacks -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u | jq -R . | jq -sc .)
-          echo "Found: $stacks"
+          all=$(find terraform/stacks -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u)
+
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
+            if [[ "$INPUT_STACK" == "all" ]]; then
+              selected="$all"
+            elif echo "$all" | grep -qx "terraform/stacks/$INPUT_STACK"; then
+              selected="terraform/stacks/$INPUT_STACK"
+            else
+              echo "::error::Stack '$INPUT_STACK' has no Terraform code yet"
+              exit 1
+            fi
+          else
+            if [[ "$EVENT" == "pull_request" ]]; then
+              changed=$(git diff --name-only "$PR_BASE...$PR_HEAD")
+            else
+              changed=$(git diff --name-only "$PUSH_BEFORE" "$PUSH_SHA")
+            fi
+            echo "Changed files:"; echo "$changed"
+
+            if echo "$changed" | grep -qE '^(terraform/modules/|\.github/workflows/terraform-deploy\.yml$)'; then
+              echo "Shared module or workflow changed - selecting all stacks"
+              selected="$all"
+            else
+              selected=""
+              for d in $all; do
+                if echo "$changed" | grep -q "^$d/"; then
+                  selected+="$d"$'\n'
+                fi
+              done
+            fi
+          fi
+
+          stacks=$(printf '%s\n' "$selected" | sed '/^$/d' | sort | jq -R . | jq -sc .)
+          echo "Selected: $stacks"
           echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
-  # PLAN - on pull requests, read-only role, plan posted as a PR comment
+  # PLAN - pull requests only; one job per stack, each posts its own comment
   # ---------------------------------------------------------------------------
   plan:
     name: plan (${{ matrix.stack }})
@@ -52,8 +111,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write       # OIDC token for AWS
-      pull-requests: write  # post the plan comment
+      id-token: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -135,10 +194,10 @@ jobs:
         run: exit 1
 
   # ---------------------------------------------------------------------------
-  # APPLY - on main only, gated by the "production" environment (manual approval)
+  # APPLY - main only; ONE job (one approval) applying selected stacks in order
   # ---------------------------------------------------------------------------
   apply:
-    name: apply (${{ matrix.stack }})
+    name: apply
     needs: discover
     if: >-
       github.event_name != 'pull_request' &&
@@ -149,17 +208,10 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    # One lock shared with the destroy workflow - apply and destroy never overlap
     concurrency:
-      group: terraform-apply-${{ matrix.stack }}
+      group: terraform-state
       cancel-in-progress: false
-    strategy:
-      fail-fast: true
-      max-parallel: 1 # stacks apply one at a time, in order
-      matrix:
-        stack: ${{ fromJSON(needs.discover.outputs.stacks) }}
-    defaults:
-      run:
-        working-directory: ${{ matrix.stack }}
     steps:
       - uses: actions/checkout@v5
 
@@ -168,17 +220,26 @@ jobs:
           role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
           role-session-name: gha-apply-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600 # EKS creates can take ~15 min per stack
 
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
-      - name: Init
-        run: terraform init -input=false
-
-      - name: Plan
-        run: terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
-
-      - name: Apply
-        run: terraform apply -input=false -no-color -lock-timeout=5m tfplan
+      - name: Apply stacks in order
+        env:
+          STACKS: ${{ needs.discover.outputs.stacks }}
+        run: |
+          echo "## Terraform apply" >> "$GITHUB_STEP_SUMMARY"
+          for stack in $(echo "$STACKS" | jq -r '.[]'); do
+            echo "::group::Apply $stack"
+            (
+              cd "$stack"
+              terraform init -input=false
+              terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+              terraform apply -input=false -no-color -lock-timeout=5m tfplan
+            )
+            echo "::endgroup::"
+            echo "- ✅ \`$stack\`" >> "$GITHUB_STEP_SUMMARY"
+          done
