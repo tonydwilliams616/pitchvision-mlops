@@ -3,6 +3,13 @@
 # workflow. Karpenter (added in 30-platform) will launch GPU/workload nodes;
 # the managed node group here only runs system components.
 # -----------------------------------------------------------------------------
+data "aws_caller_identity" "current" {}
+
+locals {
+  # CI plan role - read-only cluster access so Helm-based stacks can plan on PRs
+  plan_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-github-plan"
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
@@ -26,17 +33,33 @@ module "eks" {
   enable_cluster_creator_admin_permissions = true
 
   # Humans with cluster-admin (your IAM Identity Center / IAM role)
-  access_entries = {
-    for name, arn in var.admin_principal_arns : name => {
-      principal_arn = arn
-      policy_associations = {
-        admin = {
-          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = { type = "cluster" }
+  access_entries = merge(
+    # Humans with cluster-admin
+    {
+      for name, arn in var.admin_principal_arns : name => {
+        principal_arn = arn
+        policy_associations = {
+          admin = {
+            policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
+        }
+      }
+    },
+    # CI plan role: read-only, but including Secrets, because Helm stores
+    # release state as Secrets and must read it to plan.
+    {
+      ci-plan = {
+        principal_arn = local.plan_role_arn
+        policy_associations = {
+          view = {
+            policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminViewPolicy"
+            access_scope = { type = "cluster" }
+          }
         }
       }
     }
-  }
+  )
 
   # EKS Pod Identity instead of IRSA - the newer, simpler way to give pods AWS permissions
   enable_irsa = false
