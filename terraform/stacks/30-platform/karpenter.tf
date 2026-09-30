@@ -12,6 +12,10 @@ module "karpenter" {
 
   create_pod_identity_association = true
 
+  # The controller policy exceeds the 6,144-character limit for managed IAM
+  # policies; inline role policies allow 10,240.
+  enable_inline_policy = true
+
   # Fixed name so the EC2NodeClass manifests in gitops/ can reference it
   node_iam_role_use_name_prefix = false
   node_iam_role_name            = "${local.cluster_name}-karpenter-node"
