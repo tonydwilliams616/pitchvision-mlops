@@ -1,0 +1,27 @@
+# Test workload: scale this up to watch Karpenter launch a spot node,
+# then scale to 0 to watch consolidation remove it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inflate
+  namespace: default
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: inflate
+  template:
+    metadata:
+      labels:
+        app: inflate
+    spec:
+      nodeSelector:
+        pitchvision.io/pool: general
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: pause
+          image: public.ecr.aws/eks-distro/kubernetes/pause:3.7
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi

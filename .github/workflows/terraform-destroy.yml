@@ -23,6 +23,8 @@ env:
   TF_VERSION: "latest"
   TF_IN_AUTOMATION: "true"
   AWS_REGION: ${{ vars.AWS_REGION }}
+  CLUSTER_NAME: pitchvision-eks
+  KARPENTER_NODE_ROLE: pitchvision-eks-karpenter-node
 
 jobs:
   destroy:
@@ -52,6 +54,63 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
+
+      # -----------------------------------------------------------------------
+      # Karpenter creates EC2 instances and instance profiles that Terraform
+      # doesn't know about. Remove them first, or the node IAM role and the
+      # VPC can't be deleted.
+      # -----------------------------------------------------------------------
+      - name: Drain Karpenter nodes via Kubernetes
+        run: |
+          if ! aws eks describe-cluster --name "$CLUSTER_NAME" >/dev/null 2>&1; then
+            echo "Cluster not found - nothing to drain"
+            exit 0
+          fi
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
+
+          if ! kubectl get crd nodepools.karpenter.sh >/dev/null 2>&1; then
+            echo "Karpenter not installed - nothing to drain"
+            exit 0
+          fi
+
+          # Deleting NodePools makes Karpenter drain and terminate its nodes
+          kubectl delete nodepools.karpenter.sh --all --wait=false
+          if [ -n "$(kubectl get nodeclaims.karpenter.sh -o name)" ]; then
+            kubectl wait --for=delete nodeclaims.karpenter.sh --all --timeout=10m \
+              || echo "::warning::NodeClaims did not drain in time - falling back to EC2 cleanup"
+          fi
+
+          # Deleting EC2NodeClasses lets Karpenter remove the instance profiles it created
+          kubectl delete ec2nodeclasses.karpenter.k8s.aws --all --timeout=5m \
+            || echo "::warning::EC2NodeClass deletion timed out - falling back to IAM cleanup"
+
+      - name: Terminate any orphaned Karpenter instances
+        run: |
+          ids=$(aws ec2 describe-instances \
+            --filters "Name=tag-key,Values=karpenter.sh/nodepool" \
+                      "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned" \
+                      "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+          if [ -n "$ids" ]; then
+            echo "::warning::Terminating orphaned instances: $ids"
+            aws ec2 terminate-instances --instance-ids $ids >/dev/null
+            aws ec2 wait instance-terminated --instance-ids $ids
+          else
+            echo "No orphaned Karpenter instances"
+          fi
+
+      - name: Remove orphaned Karpenter instance profiles
+        run: |
+          if ! aws iam get-role --role-name "$KARPENTER_NODE_ROLE" >/dev/null 2>&1; then
+            echo "Karpenter node role not found - nothing to clean"
+            exit 0
+          fi
+          for ip in $(aws iam list-instance-profiles-for-role --role-name "$KARPENTER_NODE_ROLE" \
+                        --query 'InstanceProfiles[].InstanceProfileName' --output text); do
+            echo "::warning::Removing orphaned instance profile $ip"
+            aws iam remove-role-from-instance-profile --instance-profile-name "$ip" --role-name "$KARPENTER_NODE_ROLE"
+            aws iam delete-instance-profile --instance-profile-name "$ip"
+          done
 
       - name: Destroy stacks in reverse order
         run: |
