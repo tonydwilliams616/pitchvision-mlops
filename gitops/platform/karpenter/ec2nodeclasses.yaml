@@ -1,0 +1,48 @@
+# EC2NodeClass = HOW nodes are launched (AMI, subnets, security groups, disk).
+# Subnets and security groups are found by the karpenter.sh/discovery tag
+# set in the 10-network and 20-eks stacks.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  role: pitchvision-eks-karpenter-node
+  amiSelectorTerms:
+    - alias: al2023@latest # fine for a portfolio; pin a version in production
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: pitchvision-eks
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: pitchvision-eks
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 50Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+---
+# GPU nodes: same setup, bigger disk - CUDA/PyTorch images are 10GB+.
+# For GPU instance types the al2023 alias resolves to the NVIDIA-accelerated AMI.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: gpu
+spec:
+  role: pitchvision-eks-karpenter-node
+  amiSelectorTerms:
+    - alias: al2023@latest
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: pitchvision-eks
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: pitchvision-eks
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true

@@ -1,0 +1,42 @@
+# GPU spot pool for inference/training. Scales from zero; tainted so only pods
+# that explicitly tolerate nvidia.com/gpu land here.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: gpu
+spec:
+  template:
+    metadata:
+      labels:
+        pitchvision.io/pool: gpu
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: gpu
+      taints:
+        - key: nvidia.com/gpu
+          value: "true"
+          effect: NoSchedule
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: karpenter.k8s.aws/instance-family
+          operator: In
+          values: ["g4dn", "g5", "g6"]
+        - key: karpenter.k8s.aws/instance-size
+          operator: In
+          values: ["xlarge", "2xlarge"]
+      expireAfter: 168h
+  # At most 2 GPUs' worth of nodes at once - keeps within quota and budget
+  limits:
+    cpu: "16"
+    nvidia.com/gpu: "2"
+  disruption:
+    # Only remove GPU nodes once empty - never interrupt a running job to repack
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 2m
