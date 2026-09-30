@@ -64,6 +64,13 @@ resource "aws_iam_role_policy_attachment" "github_plan_readonly" {
 
 # Plan needs to read state and create/remove the S3 lock file.
 data "aws_iam_policy_document" "github_plan_state" {
+
+  statement {
+    sid       = "PullPublicEcrCharts"
+    actions   = ["ecr-public:GetAuthorizationToken", "sts:GetServiceBearerToken"]
+    resources = ["*"]
+  }
+
   statement {
     sid       = "ListStateBucket"
     actions   = ["s3:ListBucket"]
