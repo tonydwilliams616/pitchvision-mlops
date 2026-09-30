@@ -11,8 +11,9 @@ on:
         description: 'Type "destroy" to confirm'
         required: true
   schedule:
-    # Nightly safety net in case you forget - 23:00 UTC (midnight UK summer time)
-    - cron: "0 23 * * *"
+    # Nightly safety net - 22:17 UTC. Off the hour because GitHub delays
+    # scheduled runs at :00 when busy (we saw ~3h delays).
+    - cron: "17 22 * * *"
 
 permissions:
   contents: read
