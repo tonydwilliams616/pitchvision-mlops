@@ -68,6 +68,13 @@ jobs:
           fi
           aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
 
+          # Stop Argo CD reconciling first - otherwise it immediately re-creates
+          # the NodePools we're about to delete (self-heal working against us)
+          if kubectl get statefulset argocd-application-controller -n argocd >/dev/null 2>&1; then
+            kubectl scale statefulset argocd-application-controller -n argocd --replicas=0
+            kubectl rollout status statefulset argocd-application-controller -n argocd --timeout=2m || true
+          fi
+
           if ! kubectl get crd nodepools.karpenter.sh >/dev/null 2>&1; then
             echo "Karpenter not installed - nothing to drain"
             exit 0
