@@ -114,6 +114,34 @@ jobs:
 
       - name: Destroy stacks in reverse order
         run: |
+          # The VPC CNI can leave detached ("available") network interfaces behind
+          # when nodes terminate. They keep the node security group and VPC alive,
+          # so security group deletion fails with DependencyViolation.
+          cleanup_enis() {
+            local vpc="$1" wait="$2"
+            [ -z "$vpc" ] && return 0
+            if [ "$wait" = "wait" ]; then
+              # Give terminating nodes up to ~2 minutes to release their interfaces
+              for i in $(seq 1 12); do
+                in_use=$(aws ec2 describe-network-interfaces \
+                  --filters "Name=vpc-id,Values=$vpc" "Name=description,Values=aws-K8S-*" "Name=status,Values=in-use" \
+                  --query 'length(NetworkInterfaces)' --output text)
+                [ "$in_use" = "0" ] && break
+                sleep 10
+              done
+            fi
+            for eni in $(aws ec2 describe-network-interfaces \
+                --filters "Name=vpc-id,Values=$vpc" "Name=description,Values=aws-K8S-*" "Name=status,Values=available" \
+                --query 'NetworkInterfaces[].NetworkInterfaceId' --output text); do
+              echo "::warning::Deleting leaked CNI network interface $eni"
+              aws ec2 delete-network-interface --network-interface-id "$eni" || true
+            done
+          }
+
+          # VPC ID from the network stack's state (empty if already destroyed)
+          vpc_id=$(cd terraform/stacks/10-network && terraform init -input=false >/dev/null 2>&1 && terraform output -raw vpc_id 2>/dev/null || true)
+          echo "VPC: ${vpc_id:-none}"
+
           stacks=$(find terraform/stacks -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; \
             | sort -u \
             | { grep -v '/00-account$' || true; } \
@@ -125,9 +153,20 @@ jobs:
             (
               cd "$stack"
               terraform init -input=false
+
+              if [ "$(basename "$stack")" = "20-eks" ]; then
+                # Remove the nodes first, then clean up their leaked interfaces
+                # BEFORE Terraform tries to delete the node security group.
+                terraform destroy -auto-approve -input=false -no-color -lock-timeout=5m \
+                  -target=module.eks.module.eks_managed_node_group
+                cleanup_enis "$vpc_id" wait
+              fi
+
               # Safe when already destroyed - empty state means "No changes"
               terraform destroy -auto-approve -input=false -no-color -lock-timeout=5m
             )
+            # Catch anything left behind before the next (lower) stack is destroyed
+            cleanup_enis "$vpc_id"
             echo "::endgroup::"
             echo "- 🗑️ \`$stack\`" >> "$GITHUB_STEP_SUMMARY"
           done
