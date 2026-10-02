@@ -1,0 +1,38 @@
+# NVIDIA device plugin: advertises GPUs to Kubernetes as the nvidia.com/gpu
+# resource, so pods can request them. Runs only on NVIDIA GPU nodes.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nvidia-device-plugin
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://nvidia.github.io/k8s-device-plugin
+    chart: nvidia-device-plugin
+    targetRevision: 0.20.1
+    helm:
+      valuesObject:
+        # Only schedule onto GPU nodes - Karpenter labels them with the GPU maker
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: karpenter.k8s.aws/instance-gpu-manufacturer
+                      operator: In
+                      values: ["nvidia"]
+        # Tolerate the taint on our gpu NodePool
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nvidia-device-plugin
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
