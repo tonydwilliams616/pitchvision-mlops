@@ -19,18 +19,20 @@ spec:
           value: "true"
           effect: NoSchedule
       requirements:
+        # Spot preferred; on-demand only when no GPU spot capacity is available
         - key: karpenter.sh/capacity-type
           operator: In
-          values: ["spot"]
+          values: ["spot", "on-demand"]
+        # 4xlarge still has 1 GPU, but often has spot capacity when smaller sizes don't
+        - key: karpenter.k8s.aws/instance-size
+          operator: In
+          values: ["xlarge", "2xlarge", "4xlarge"]
         - key: kubernetes.io/arch
           operator: In
           values: ["amd64"]
         - key: karpenter.k8s.aws/instance-family
           operator: In
           values: ["g4dn", "g5", "g6"]
-        - key: karpenter.k8s.aws/instance-size
-          operator: In
-          values: ["xlarge", "2xlarge"]
       expireAfter: 168h
   # At most 2 GPUs' worth of nodes at once - keeps within quota and budget
   limits:
