@@ -23,9 +23,9 @@ output "public_subnet_ids" {
   value       = module.vpc.public_subnets
 }
 
-output "nat_public_ips" {
-  description = "Public IP(s) of the NAT gateway."
-  value       = module.vpc.nat_public_ips
+output "private_route_table_ids" {
+  description = "Private route table IDs - 15-nat adds the default route via the NAT gateway here."
+  value       = module.vpc.private_route_table_ids
 }
 
 output "cluster_name" {
