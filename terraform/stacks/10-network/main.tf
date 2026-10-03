@@ -1,6 +1,8 @@
 # -----------------------------------------------------------------------------
-# Ephemeral network: destroyed after each working session by the
-# Terraform Destroy workflow to avoid NAT gateway costs.
+# PERSISTENT network: VPC, subnets, route tables, internet gateway and the S3
+# gateway endpoint. All free, so it stays up permanently and gives the data
+# layer (18-data) a stable home. The NAT gateway - the only part that costs
+# money - lives in the ephemeral 15-nat stack and is destroyed every session.
 # -----------------------------------------------------------------------------
 
 # Pick AZs by zone ID, not name - names map to different physical zones per
@@ -38,8 +40,10 @@ module "vpc" {
   private_subnets = local.private_subnets
   public_subnets  = local.public_subnets
 
-  # One NAT gateway for the whole VPC (not one per AZ) - cost over resilience.
-  enable_nat_gateway     = true
+  # No NAT here - see 15-nat. single_nat_gateway = true still matters: it makes
+  # the module create ONE shared private route table, which 15-nat adds its
+  # default route to.
+  enable_nat_gateway     = false
   single_nat_gateway     = true
   one_nat_gateway_per_az = false
 

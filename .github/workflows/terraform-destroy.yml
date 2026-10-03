@@ -1,7 +1,8 @@
 name: Terraform Destroy
 
-# Tears down every stack EXCEPT 00-account (budgets/alerts stay up permanently),
-# in reverse order: 30-platform -> 20-eks -> 10-network.
+# Tears down the EPHEMERAL stacks only, in this order: 30-platform -> 20-eks -> 15-nat.
+# Persistent stacks (00-account, 10-network, 18-data) hold state or cost nothing
+# when idle, so they are never touched here.
 # Spin back up with: Actions -> Terraform Deploy -> Run workflow.
 
 on:
@@ -25,6 +26,8 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   CLUSTER_NAME: pitchvision-eks
   KARPENTER_NODE_ROLE: pitchvision-eks-karpenter-node
+  # Destroyed in exactly this order. Stacks without code yet are skipped.
+  EPHEMERAL_STACKS: "30-platform 20-eks 15-nat"
 
 jobs:
   destroy:
@@ -145,14 +148,17 @@ jobs:
             done
           }
 
-          # VPC ID from the network stack's state (empty if already destroyed)
+          # VPC ID from the (persistent) network stack's state
           vpc_id=$(cd terraform/stacks/10-network && terraform init -input=false >/dev/null 2>&1 && terraform output -raw vpc_id 2>/dev/null || true)
           echo "VPC: ${vpc_id:-none}"
 
-          stacks=$(find terraform/stacks -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; \
-            | sort -u \
-            | { grep -v '/00-account$' || true; } \
-            | sort -r)
+          stacks=""
+          for s in $EPHEMERAL_STACKS; do
+            if ls "terraform/stacks/$s"/*.tf >/dev/null 2>&1; then
+              stacks+="terraform/stacks/$s "
+            fi
+          done
+          echo "Will destroy (in order): ${stacks:-nothing}"
 
           echo "## Terraform destroy" >> "$GITHUB_STEP_SUMMARY"
           for stack in $stacks; do
