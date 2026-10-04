@@ -1,0 +1,2 @@
+# Client matches the MLflow server version (3.16.0)
+mlflow-skinny==3.16.0
