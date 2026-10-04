@@ -25,3 +25,8 @@ output "backend_config_example" {
     }
   EOT
 }
+
+output "github_ecr_push_role_arn" {
+  description = "Role for pushing images from main - store as GitHub variable AWS_ECR_PUSH_ROLE_ARN."
+  value       = aws_iam_role.github_ecr_push.arn
+}

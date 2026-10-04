@@ -140,3 +140,65 @@ resource "aws_iam_role_policy_attachment" "github_apply_admin" {
   role       = aws_iam_role.github_apply.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
+
+# -----------------------------------------------------------------------------
+# ECR PUSH role - assumable only from pushes to main. Publishes training and
+# inference images to pitchvision/* repositories, nothing else.
+# -----------------------------------------------------------------------------
+data "aws_iam_policy_document" "github_ecr_push_trust" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["${local.github_oidc_subject_prefix}:ref:refs/heads/main"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_ecr_push" {
+  name                 = "${var.project_name}-github-ecr-push"
+  description          = "Assumed by GitHub Actions on main to push images to ECR"
+  assume_role_policy   = data.aws_iam_policy_document.github_ecr_push_trust.json
+  max_session_duration = 3600
+}
+
+data "aws_iam_policy_document" "github_ecr_push" {
+  statement {
+    sid       = "EcrLogin"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"] # account-level API, cannot be scoped
+  }
+
+  statement {
+    sid = "PushToProjectRepos"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+      "ecr:PutImage",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+    ]
+    resources = ["arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_ecr_push" {
+  name   = "ecr-push"
+  role   = aws_iam_role.github_ecr_push.id
+  policy = data.aws_iam_policy_document.github_ecr_push.json
+}
