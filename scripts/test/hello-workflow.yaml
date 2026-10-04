@@ -1,0 +1,23 @@
+# Smoke test: one step on a Karpenter node that writes a file as an output
+# artifact. Proves scheduling, the workflow service account, and Pod Identity
+# writing to S3. Run with: kubectl create -f scripts/test/hello-workflow.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: hello-
+  namespace: workflows
+spec:
+  entrypoint: main
+  serviceAccountName: argo-workflow
+  templates:
+    - name: main
+      nodeSelector:
+        pitchvision.io/pool: general
+      container:
+        image: busybox:1.38.0
+        command: [sh, -c]
+        args: ["echo 'PitchVision workflow says hello' > /tmp/hello.txt && cat /tmp/hello.txt"]
+      outputs:
+        artifacts:
+          - name: hello
+            path: /tmp/hello.txt

@@ -8,6 +8,8 @@ data "aws_caller_identity" "current" {}
 locals {
   # CI plan role - read-only cluster access so Helm-based stacks can plan on PRs
   plan_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-github-plan"
+    # CI apply role - named explicitly so plans don't depend on who runs Terraform
+  apply_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-github-apply"
 }
 
 module "eks" {
@@ -30,7 +32,7 @@ module "eks" {
 
   # Gives the identity that creates the cluster (the CI apply role) admin,
   # which later stacks need to install Helm charts.
-  enable_cluster_creator_admin_permissions = true
+  enable_cluster_creator_admin_permissions = false
 
   # Humans with cluster-admin (your IAM Identity Center / IAM role)
   access_entries = merge(
@@ -58,8 +60,21 @@ module "eks" {
           }
         }
       }
+    },
+        # CI apply role: cluster-admin, needed to install Helm charts in 30-platform
+    {
+      ci-apply = {
+        principal_arn = local.apply_role_arn
+        policy_associations = {
+          admin = {
+            policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
+        }
+      }
     }
   )
+  
 
   # EKS Pod Identity instead of IRSA - the newer, simpler way to give pods AWS permissions
   enable_irsa = false
@@ -78,6 +93,9 @@ module "eks" {
     eks-pod-identity-agent = {
       most_recent    = true
       before_compute = true
+    }
+    metrics-server = {
+      most_recent = true
     }
   }
 

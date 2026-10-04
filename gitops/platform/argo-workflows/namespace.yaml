@@ -1,0 +1,5 @@
+# Where ML pipelines run - separate from the Argo control plane in "argo"
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workflows

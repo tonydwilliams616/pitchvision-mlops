@@ -1,0 +1,57 @@
+# Argo Workflows: runs multi-step ML pipelines (data prep, training,
+# evaluation, registration) as Kubernetes pods. Controller + UI on the
+# system nodes; the workflow steps themselves run on Karpenter nodes.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-workflows
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-workflows
+    targetRevision: 2.0.11
+    helm:
+      valuesObject:
+        singleNamespace: false
+        controller:
+          # Workflows run in their own namespace, created by argo-workflows-config
+          workflowNamespaces:
+            - workflows
+          nodeSelector:
+            pitchvision.io/pool: system
+        server:
+          # Port-forward only, single user: no login. Not for a shared cluster.
+          authModes:
+            - server
+          nodeSelector:
+            pitchvision.io/pool: system
+        workflow:
+          serviceAccount:
+            create: true
+            name: argo-workflow # must match the Pod Identity association
+          rbac:
+            create: true
+        # No access keys: pods use their Pod Identity credentials
+        useStaticCredentials: false
+        artifactRepository:
+          archiveLogs: true
+          s3:
+            bucket: pitchvision-mlflow-artifacts-352438994554
+            keyFormat: "argo-workflows/{{workflow.name}}/{{pod.name}}"
+            endpoint: s3.amazonaws.com
+            region: us-east-1
+            insecure: false
+            useSDKCreds: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # Lesson from External Secrets: large CRDs need server-side apply
+      - ServerSideApply=true
