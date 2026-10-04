@@ -1,0 +1,57 @@
+# -----------------------------------------------------------------------------
+# Argo Workflows S3 access, via Pod Identity. Workflow pods store step outputs
+# (artifacts) and archived logs under the argo-workflows/ prefix of the
+# permanent artifacts bucket; the Argo server reads them back for the UI.
+# The role can touch ONLY that prefix - MLflow's area is out of reach.
+# -----------------------------------------------------------------------------
+locals {
+  workflows_prefix = "argo-workflows"
+}
+
+resource "aws_iam_role" "argo_workflows" {
+  name               = "${var.project_name}-argo-workflows"
+  description        = "Argo Workflows - artifacts and logs under the argo-workflows/ prefix"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
+}
+
+data "aws_iam_policy_document" "argo_workflows" {
+  statement {
+    sid       = "ListWorkflowsPrefix"
+    actions   = ["s3:ListBucket"]
+    resources = [local.artifacts_bucket_arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["${local.workflows_prefix}/*"]
+    }
+  }
+
+  statement {
+    sid       = "ReadWriteWorkflowsPrefix"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${local.artifacts_bucket_arn}/${local.workflows_prefix}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "argo_workflows" {
+  name   = "argo-workflows-artifacts"
+  role   = aws_iam_role.argo_workflows.id
+  policy = data.aws_iam_policy_document.argo_workflows.json
+}
+
+# Workflow pods (they write artifacts and logs)
+resource "aws_eks_pod_identity_association" "argo_workflow_pods" {
+  cluster_name    = local.cluster_name
+  namespace       = "workflows"
+  service_account = "argo-workflow"
+  role_arn        = aws_iam_role.argo_workflows.arn
+}
+
+# Argo server (reads artifacts and logs back for the UI)
+resource "aws_eks_pod_identity_association" "argo_workflows_server" {
+  cluster_name    = local.cluster_name
+  namespace       = "argo"
+  service_account = "argo-workflows-server"
+  role_arn        = aws_iam_role.argo_workflows.arn
+}
