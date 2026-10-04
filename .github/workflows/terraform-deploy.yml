@@ -22,6 +22,8 @@ on:
           - all
           - 00-account
           - 10-network
+          - 15-nat
+          - 18-data
           - 20-eks
           - 30-platform
 

@@ -1,0 +1,54 @@
+# MLflow tracking server + model registry.
+#   metadata  -> Aurora PostgreSQL (18-data), credentials from the mlflow-db Secret
+#   artifacts -> S3 (18-data), via Pod Identity; proxied, so clients need no AWS access
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mlflow
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://community-charts.github.io/helm-charts
+    chart: mlflow
+    targetRevision: 1.11.7
+    helm:
+      valuesObject:
+        serviceAccount:
+          create: true
+          name: mlflow # must match the Pod Identity association
+        backendStore:
+          databaseMigration: true      # creates/upgrades MLflow's tables
+          databaseConnectionCheck: true # waits for Aurora to wake from pause
+          postgres:
+            enabled: true
+            host: pitchvision-mlflow.cluster-co5o4iu0qpq5.us-east-1.rds.amazonaws.com
+            port: 5432
+            database: mlflow
+          existingDatabaseSecret:
+            name: mlflow-db
+            usernameKey: username
+            passwordKey: password
+        artifactRoot:
+          proxiedArtifactStorage: true
+          s3:
+            enabled: true
+            bucket: pitchvision-mlflow-artifacts-352438994554
+            path: mlflow
+        nodeSelector:
+          pitchvision.io/pool: general # Karpenter spot node
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            memory: 1Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mlflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
