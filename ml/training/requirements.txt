@@ -1,2 +1,12 @@
-# Client matches the MLflow server version (3.16.0)
-mlflow-skinny==3.16.0
+# Lower bounds only: the exact resolved versions are frozen INTO the image
+# (immutable, tagged by commit) and logged to MLflow with every run.
+torch>=2.6
+torchvision>=0.21
+transformers>=4.52        # RT-DETRv2 support
+huggingface_hub>=0.30
+torchmetrics>=1.6         # COCO mAP, per class
+pycocotools>=2.0.8        # torchmetrics' mAP backend
+boto3>=1.35               # dataset download from S3 (Pod Identity credentials)
+pillow>=11
+numpy>=2
+mlflow-skinny==3.16.0     # matches the MLflow server
