@@ -27,11 +27,19 @@ jobs:
   build:
     name: build${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && ' and push' || '' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v7
+
+      # The CUDA/PyTorch layers are several GB; hosted runners ship with
+      # large preinstalled toolchains we don't need
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
 
       - uses: docker/setup-buildx-action@v3
 
