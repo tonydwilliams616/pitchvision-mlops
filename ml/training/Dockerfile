@@ -27,7 +27,11 @@ COPY train.py .
 
 # The Git commit, logged to MLflow with every run
 ARG GIT_SHA=unknown
-ENV IMAGE_GIT_SHA=${GIT_SHA}
+ENV IMAGE_GIT_SHA=${GIT_SHA} \
+    # Checkpoint is baked in above - never call the Hugging Face Hub at runtime
+    HF_HUB_OFFLINE=1 \
+    # No git in the image; the commit is already logged as image_git_sha
+    GIT_PYTHON_REFRESH=quiet
 
 USER trainer
 
