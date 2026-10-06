@@ -25,10 +25,7 @@ spec:
         value: "8"
       - name: lr
         value: "1e-4"
-
-  # Cost guardrails: a stuck run can't hold a GPU for more than 2 hours,
-  # and finished workflows are cleaned up after a day
-  activeDeadlineSeconds: 7200
+  # Finished workflows are cleaned up after a day
   ttlStrategy:
     secondsAfterCompletion: 86400
 
@@ -42,6 +39,10 @@ spec:
 
   templates:
     - name: train
+      # Cost guardrail: one attempt can't hold a GPU for more than 2 hours.
+      # Set per step, not per workflow: a workflow-level deadline from a
+      # WorkflowTemplate failed every attempt instantly ("Deadline exceeded").
+      activeDeadlineSeconds: 7200
       # Spot GPU can be reclaimed mid-run: retry on a fresh node
       retryStrategy:
         limit: "2"
