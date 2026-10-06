@@ -1,0 +1,81 @@
+# Training pipeline for the PitchVision detector. Synced by the
+# argo-workflows-config app; submit runs with scripts/train/submit-training.yaml
+# or from the Argo Workflows UI (Workflow Templates -> train-detector -> Submit).
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: train-detector
+  namespace: workflows
+spec:
+  entrypoint: train
+  serviceAccountName: argo-workflow # Pod Identity: dataset read + Argo artifact/log write
+
+  arguments:
+    parameters:
+      # The image is pinned by commit SHA: every run records exactly which code trained it
+      - name: image-tag
+        value: "6dee423ea0347ff42e768c02b59a9ef3b8d4b610"
+      - name: dataset-uri
+        value: "s3://pitchvision-datasets-352438994554/football-players-detection/v13"
+      - name: epochs
+        value: "25"
+      - name: image-size
+        value: "640"
+      - name: batch-size
+        value: "8"
+      - name: lr
+        value: "1e-4"
+
+  # Cost guardrails: a stuck run can't hold a GPU for more than 2 hours,
+  # and finished workflows are cleaned up after a day
+  activeDeadlineSeconds: 7200
+  ttlStrategy:
+    secondsAfterCompletion: 86400
+
+  volumes:
+    # PyTorch DataLoader workers share batches via /dev/shm; the container
+    # default is 64 MB, which crashes multi-worker loading with "Bus error"
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+
+  templates:
+    - name: train
+      # Spot GPU can be reclaimed mid-run: retry on a fresh node
+      retryStrategy:
+        limit: "2"
+        retryPolicy: OnError
+      nodeSelector:
+        pitchvision.io/pool: gpu
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      container:
+        image: "352438994554.dkr.ecr.us-east-1.amazonaws.com/pitchvision/training:{{workflow.parameters.image-tag}}"
+        args:
+          - --dataset-uri={{workflow.parameters.dataset-uri}}
+          - --epochs={{workflow.parameters.epochs}}
+          - --image-size={{workflow.parameters.image-size}}
+          - --batch-size={{workflow.parameters.batch-size}}
+          - --lr={{workflow.parameters.lr}}
+          - --run-name={{workflow.name}}
+          - --register
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow.mlflow.svc.cluster.local:80"
+          - name: AWS_DEFAULT_REGION
+            value: us-east-1
+        resources:
+          # Fits a g4dn.xlarge (4 vCPU, 16 GiB, 1x T4) after system daemons
+          requests:
+            cpu: "3"
+            memory: 10Gi
+            nvidia.com/gpu: "1"
+          limits:
+            memory: 13Gi
+            nvidia.com/gpu: "1"
+        volumeMounts:
+          - name: dshm
+            mountPath: /dev/shm

@@ -5,7 +5,8 @@
 # The role can touch ONLY that prefix - MLflow's area is out of reach.
 # -----------------------------------------------------------------------------
 locals {
-  workflows_prefix = "argo-workflows"
+  workflows_prefix    = "argo-workflows"
+  datasets_bucket_arn = data.terraform_remote_state.data.outputs.datasets_bucket_arn
 }
 
 resource "aws_iam_role" "argo_workflows" {
@@ -31,6 +32,18 @@ data "aws_iam_policy_document" "argo_workflows" {
     sid       = "ReadWriteWorkflowsPrefix"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = ["${local.artifacts_bucket_arn}/${local.workflows_prefix}/*"]
+  }
+  # Training jobs read datasets - read-only, never write
+  statement {
+    sid       = "ListDatasets"
+    actions   = ["s3:ListBucket"]
+    resources = [local.datasets_bucket_arn]
+  }
+
+  statement {
+    sid       = "ReadDatasets"
+    actions   = ["s3:GetObject"]
+    resources = ["${local.datasets_bucket_arn}/*"]
   }
 }
 
