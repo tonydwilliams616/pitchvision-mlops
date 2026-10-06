@@ -1,0 +1,15 @@
+# Submit a training run from the train-detector WorkflowTemplate:
+#   kubectl create -f scripts/train/submit-training.yaml
+# Override any template parameter below (unlisted ones use the template defaults).
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: train-detector-
+  namespace: workflows
+spec:
+  workflowTemplateRef:
+    name: train-detector
+  arguments:
+    parameters:
+      - name: epochs
+        value: "25"

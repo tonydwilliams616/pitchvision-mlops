@@ -17,7 +17,7 @@ spec:
         # Default is 4 workers, each loading a full copy of MLflow (OOMKilled at 2Gi).
         # 2 is plenty for a single-user tracking server.
         extraArgs:
-          workers: "2"
+          workers: "1"
         # Pod Identity provides credentials but not a region
         extraEnvVars:
           AWS_DEFAULT_REGION: us-east-1
