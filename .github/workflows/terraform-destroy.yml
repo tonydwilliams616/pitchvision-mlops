@@ -44,16 +44,16 @@ jobs:
       group: terraform-state
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
           role-session-name: gha-destroy-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
           role-duration-seconds: 3600
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
