@@ -2,6 +2,7 @@
 # (immutable, tagged by commit) and logged to MLflow with every run.
 torch>=2.6
 torchvision>=0.21
+scipy>=1.13               # RT-DETR's Hungarian matcher (training loss)
 transformers>=4.52        # RT-DETRv2 support
 huggingface_hub>=0.30
 torchmetrics>=1.6         # COCO mAP, per class
