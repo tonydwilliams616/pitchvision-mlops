@@ -15,9 +15,20 @@ spec:
     helm:
       valuesObject:
         # Default is 4 workers, each loading a full copy of MLflow (OOMKilled at 2Gi).
-        # 2 is plenty for a single-user tracking server.
+        # 1 is plenty for a single-user tracking server.
         extraArgs:
           workers: "1"
+        # MLflow 3 only accepts Host headers it trusts (DNS-rebinding protection).
+        # In-cluster clients (training jobs) + localhost for port-forward.
+        serverAllowedHosts:
+          - mlflow.mlflow.svc.cluster.local
+          - mlflow.mlflow.svc.cluster.local:80
+          - mlflow.mlflow.svc
+          - mlflow
+          - localhost
+          - localhost:5000
+          - 127.0.0.1
+          - 127.0.0.1:5000
         # Pod Identity provides credentials but not a region
         extraEnvVars:
           AWS_DEFAULT_REGION: us-east-1
