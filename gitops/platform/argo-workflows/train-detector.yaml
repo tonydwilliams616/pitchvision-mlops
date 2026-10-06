@@ -55,6 +55,9 @@ spec:
           effect: NoSchedule
       container:
         image: "352438994554.dkr.ecr.us-east-1.amazonaws.com/pitchvision/training:{{workflow.parameters.image-tag}}"
+        # Explicit command: Argo's emissary executor must know it, and otherwise
+        # looks it up from the registry - which fails (401) for private ECR images
+        command: ["python", "/app/train.py"]
         args:
           - --dataset-uri={{workflow.parameters.dataset-uri}}
           - --epochs={{workflow.parameters.epochs}}
