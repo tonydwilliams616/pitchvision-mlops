@@ -14,7 +14,7 @@ spec:
     parameters:
       # The image is pinned by commit SHA: every run records exactly which code trained it
       - name: image-tag
-        value: "6dee423ea0347ff42e768c02b59a9ef3b8d4b610"
+        value: "abcc3f3d150f399aa1bdcf5a3dbc2cd364b45123"
       - name: dataset-uri
         value: "s3://pitchvision-datasets-352438994554/football-players-detection/v13"
       - name: epochs
