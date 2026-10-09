@@ -20,7 +20,7 @@ env:
 jobs:
   fmt:
     name: terraform fmt
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4
@@ -32,7 +32,7 @@ jobs:
 
   discover:
     name: find Terraform roots
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       dirs: ${{ steps.find.outputs.dirs }}
     steps:
@@ -48,7 +48,7 @@ jobs:
     name: validate (${{ matrix.dir }})
     needs: discover
     if: needs.discover.outputs.dirs != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -69,7 +69,7 @@ jobs:
 
   tflint:
     name: tflint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -86,7 +86,7 @@ jobs:
 
   checkov:
     name: checkov security scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -103,7 +103,7 @@ jobs:
     name: ci-passed
     if: always()
     needs: [fmt, discover, validate, tflint, checkov]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check results
         run: |
