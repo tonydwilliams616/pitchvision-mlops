@@ -7,3 +7,5 @@ python-multipart>=0.0.9   # file uploads
 pillow>=11
 numpy>=2
 mlflow-skinny==3.16.0     # matches the MLflow server
+boto3>=1.35               # video job: clip download from S3 (Pod Identity)
+imageio[ffmpeg]>=2.34     # video job: read clips, write H.264 (bundles ffmpeg)
