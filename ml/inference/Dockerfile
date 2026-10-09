@@ -19,7 +19,7 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch torchvisi
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY app.py .
+COPY *.py .
 
 ARG GIT_SHA=unknown
 ENV IMAGE_GIT_SHA=${GIT_SHA} \
