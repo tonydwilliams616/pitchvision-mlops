@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference
+  labels:
+    app.kubernetes.io/name: inference
+    app.kubernetes.io/part-of: pitchvision
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inference
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inference
+        app.kubernetes.io/part-of: pitchvision
+    spec:
+      # Ordinary spot nodes: the service runs on CPU, no GPU needed
+      nodeSelector:
+        pitchvision.io/pool: general
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: inference
+          # Pinned by commit SHA, like the training image
+          image: 352438994554.dkr.ecr.us-east-1.amazonaws.com/pitchvision/inference:1e17c5d2535367b595362536f913875c1d23f179
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: "http://mlflow.mlflow.svc.cluster.local:80"
+            - name: MODEL_NAME
+              value: pitchvision-detector
+            # Serve whichever version holds this alias; restart to pick up a new champion
+            - name: MODEL_ALIAS
+              value: champion
+            - name: SCORE_THRESHOLD
+              value: "0.5"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1536Mi
+            limits:
+              memory: 3Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # Startup downloads the model from MLflow and loads it (can take a minute,
+          # longer if Aurora is waking): allow up to ~3 minutes before liveness applies
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
