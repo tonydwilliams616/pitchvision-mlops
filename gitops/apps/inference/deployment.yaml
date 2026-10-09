@@ -25,7 +25,7 @@ spec:
       containers:
         - name: inference
           # Pinned by commit SHA, like the training image
-          image: 352438994554.dkr.ecr.us-east-1.amazonaws.com/pitchvision/inference:1e17c5d2535367b595362536f913875c1d23f179
+          image: 352438994554.dkr.ecr.us-east-1.amazonaws.com/pitchvision/inference:292168db3b62a0bfda2a9fdfd1da39a48eb8ed15
           ports:
             - name: http
               containerPort: 8080

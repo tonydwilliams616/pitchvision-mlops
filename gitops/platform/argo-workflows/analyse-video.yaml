@@ -1,0 +1,64 @@
+# Video analysis with the @champion detector, on CPU (general spot nodes).
+# Synced by argo-workflows-config; submit with scripts/video/submit-analysis.yaml
+# or from the Argo Workflows UI (Workflow Templates -> analyse-video -> Submit).
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: analyse-video
+  namespace: workflows
+spec:
+  entrypoint: analyse
+  serviceAccountName: argo-workflow # Pod Identity: read video-clips/ in the datasets bucket
+
+  arguments:
+    parameters:
+      # Inference image pinned by commit SHA (contains analyse_video.py)
+      - name: image-tag
+        value: "292168db3b62a0bfda2a9fdfd1da39a48eb8ed15"
+      - name: video-uri
+        value: "s3://pitchvision-datasets-352438994554/video-clips/from-above-01.mp4"
+      # Analyse every Nth frame: the CPU cost/coverage trade-off
+      - name: every
+        value: "5"
+      - name: threshold
+        value: "0.5"
+      - name: alias
+        value: champion
+
+  # Finished workflows are cleaned up after a day
+  ttlStrategy:
+    secondsAfterCompletion: 86400
+
+  templates:
+    - name: analyse
+      # Guardrail: one attempt can't run for more than an hour
+      activeDeadlineSeconds: 3600
+      retryStrategy:
+        limit: "1"
+        retryPolicy: OnError
+      nodeSelector:
+        pitchvision.io/pool: general
+      container:
+        image: "352438994554.dkr.ecr.us-east-1.amazonaws.com/pitchvision/inference:{{workflow.parameters.image-tag}}"
+        # Explicit command: Argo can't read the ENTRYPOINT of a private ECR image
+        command: ["python", "/app/analyse_video.py"]
+        args:
+          - --video-uri={{workflow.parameters.video-uri}}
+          - --every={{workflow.parameters.every}}
+          - --threshold={{workflow.parameters.threshold}}
+          - --alias={{workflow.parameters.alias}}
+          - --run-name={{workflow.name}}
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow.mlflow.svc.cluster.local:80"
+          - name: MODEL_NAME
+            value: pitchvision-detector
+          - name: AWS_DEFAULT_REGION
+            value: us-east-1
+        resources:
+          # PyTorch uses all the cores it's given; fits a 4-vCPU spot node
+          requests:
+            cpu: "3"
+            memory: 4Gi
+          limits:
+            memory: 6Gi
