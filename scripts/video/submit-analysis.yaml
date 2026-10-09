@@ -1,0 +1,15 @@
+# Analyse a clip with the analyse-video WorkflowTemplate:
+#   kubectl create -f scripts/video/submit-analysis.yaml
+# Change video-uri to analyse a different clip (unlisted parameters use the template defaults).
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: analyse-video-
+  namespace: workflows
+spec:
+  workflowTemplateRef:
+    name: analyse-video
+  arguments:
+    parameters:
+      - name: video-uri
+        value: "s3://pitchvision-datasets-352438994554/video-clips/from-above-01.mp4"
