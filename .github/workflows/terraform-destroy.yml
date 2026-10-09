@@ -33,7 +33,7 @@ jobs:
   destroy:
     name: destroy
     if: github.event_name == 'schedule' || github.event.inputs.confirm == 'destroy'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # No required reviewers on this environment, so the nightly run isn't blocked
     environment: teardown
     permissions:
