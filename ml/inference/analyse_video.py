@@ -35,6 +35,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-frames", type=int, default=0, help="Stop after N analysed frames (0 = whole clip)")
     p.add_argument("--experiment", default="pitchvision-video-analysis")
     p.add_argument("--run-name", default=None)
+    p.add_argument("--run-id-file", default=None,
+                   help="Write the MLflow run ID here (lets the next workflow step find this run)")
     return p.parse_args()
 
 
@@ -61,11 +63,13 @@ def main() -> None:
                                 pixelformat="yuv420p", quality=7, macro_block_size=1)
 
     frames: list[dict] = []
+    frame_size = None
     started = time.perf_counter()
     for index, frame in enumerate(reader):
         if index % args.every:
             continue
         image = Image.fromarray(frame).convert("RGB")
+        frame_size = [image.width, image.height]
         detections, ms = detector.detect(image, args.threshold)
         counts = Counter(d["label"] for d in detections)
         balls = [d for d in detections if d["label"] == "ball"]
@@ -91,6 +95,8 @@ def main() -> None:
 
     summary = {
         "frames_analysed": len(frames),
+        "frame_width": frame_size[0],
+        "frame_height": frame_size[1],
         "clip_seconds": round(frames[-1]["time_s"], 2),
         "avg_players": mean_count("player"),
         "avg_goalkeepers": mean_count("goalkeeper"),
@@ -101,7 +107,7 @@ def main() -> None:
     }
 
     mlflow.set_experiment(args.experiment)
-    with mlflow.start_run(run_name=args.run_name):
+    with mlflow.start_run(run_name=args.run_name) as run:
         # Lineage: which model analysed which clip, with which code
         mlflow.set_tags({
             "model_name": args.model_name,
@@ -116,6 +122,8 @@ def main() -> None:
         mlflow.log_dict(summary, "stats/summary.json")
         mlflow.log_dict({"frames": frames}, "stats/per_frame.json")
         mlflow.log_artifact(str(annotated), artifact_path="video")
+    if args.run_id_file:
+        Path(args.run_id_file).write_text(run.info.run_id)
 
     print("SUMMARY  " + "  ".join(f"{k}={v}" for k, v in summary.items()))
 
