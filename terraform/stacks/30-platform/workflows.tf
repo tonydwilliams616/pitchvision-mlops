@@ -4,9 +4,14 @@
 # permanent artifacts bucket; the Argo server reads them back for the UI.
 # The role can touch ONLY that prefix - MLflow's area is out of reach.
 # -----------------------------------------------------------------------------
+
+data "aws_caller_identity" "current" {}
+
 locals {
   workflows_prefix    = "argo-workflows"
   datasets_bucket_arn = data.terraform_remote_state.data.outputs.datasets_bucket_arn
+  # Bedrock model the match-summary step may call (cross-region inference profile)
+  bedrock_model_id = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
 resource "aws_iam_role" "argo_workflows" {
@@ -44,6 +49,16 @@ data "aws_iam_policy_document" "argo_workflows" {
     sid       = "ReadDatasets"
     actions   = ["s3:GetObject"]
     resources = ["${local.datasets_bucket_arn}/*"]
+  }
+  # Match summaries: invoke ONE model, via its US inference profile. The profile
+  # routes to the model in whichever US region has capacity, so both ARNs are needed.
+  statement {
+    sid     = "InvokeSummaryModel"
+    actions = ["bedrock:InvokeModel"]
+    resources = [
+      "arn:aws:bedrock:us-east-1:${data.aws_caller_identity.current.account_id}:inference-profile/${local.bedrock_model_id}",
+      "arn:aws:bedrock:*::foundation-model/${trimprefix(local.bedrock_model_id, "us.")}",
+    ]
   }
 }
 
