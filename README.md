@@ -115,7 +115,7 @@ The LLM never sees the video – only a digest of the detector's statistics, wit
 | GPU training run (T4, ~8–12 min) | ~$0.10 |
 | At rest (Aurora paused, S3, ECR) | pennies per day |
 
-Permanent stacks hold only data; everything billed by the hour is destroyed nightly and rebuilt in ~20 minutes. About 21 cluster-hours in the first week of October cost ~$8.30 before tax. AWS Budgets and Cost Anomaly Detection alert by email.
+Permanent stacks hold only data; everything billed by the hour is destroyed nightly and rebuilt in ~20 minutes. About 21 cluster-hours over a week of development cost ~$8.30 before tax. AWS Budgets and Cost Anomaly Detection alert by email.
 
 ## Engineering decisions
 
@@ -167,13 +167,30 @@ aws eks update-kubeconfig --name pitchvision-eks --region us-east-1
 kubectl create -f scripts/train/submit-training.yaml
 kubectl create -f scripts/video/submit-analysis.yaml
 
-# Results
-kubectl port-forward -n mlflow svc/mlflow 5000:80            # MLflow UI
-kubectl port-forward -n inference svc/inference 8080:80      # inference API
+# Inference API
+kubectl port-forward -n inference svc/inference 8080:80
 curl -F "file=@frame.jpg" localhost:8080/predict/annotated -o annotated.jpg
 
 # Tear down: Actions → Terraform Destroy (also runs nightly)
 ```
+
+### Web UIs
+
+Nothing is exposed to the internet: every UI is reached through `kubectl port-forward` (run each in its own terminal, then open the URL).
+
+| UI | Command | URL |
+| --- | --- | --- |
+| **Argo CD** – what's deployed, sync status | `kubectl port-forward -n argocd svc/argocd-server 8080:80` | http://localhost:8080 |
+| **Argo Workflows** – pipeline runs, step logs, artifacts | `kubectl port-forward -n argo svc/argo-workflows-server 2746:2746` | http://localhost:2746 (namespace `workflows`) |
+| **MLflow** – experiments, metrics, model registry, traces | `kubectl port-forward -n mlflow svc/mlflow 5000:80` | http://localhost:5000 |
+
+Argo CD's username is `admin`; the initial password is in a Kubernetes secret:
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+```
+
+The Argo CD UI and the inference API both default to local port 8080, so run one at a time or change the first number (for example `8081:80`).
 
 ## Roadmap
 
