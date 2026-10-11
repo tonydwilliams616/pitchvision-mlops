@@ -44,3 +44,5 @@ terraform.rc
 # planout
 tmp/
 /data/
+# macOS Finder metadata
+.DS_Store
